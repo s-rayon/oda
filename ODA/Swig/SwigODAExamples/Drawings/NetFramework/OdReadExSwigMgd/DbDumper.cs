@@ -315,8 +315,12 @@ namespace OdReadExSwigMgd
                 newPath.With(newBlockIdComp);
             }
 
+            // test path Verb/point sequence
+            testPath(newPathComp, pPoly.isClosed());
+
             // add path to model
             newModel.Elements.Add(newPath);
+
         }
 
 
@@ -378,8 +382,8 @@ namespace OdReadExSwigMgd
                 newPathComp.Verbs.Add(Rayon.Core.Components.PathComp.PathVerbEnum.LineTo);
             }
 
-            // test path
-            //testPath(newPathComp, pPolyline.isClosed());
+            // test path Verb/point sequence
+            testPath(newPathComp, pPolyline.isClosed());
 
             //// to rayon
             Rayon.Core.Element newPath = Rayon.Core.Element.CreatePath(
@@ -608,11 +612,18 @@ namespace OdReadExSwigMgd
 
             if (!isClosed)
             {
-                double angleValue = ((OdDbArc)pEnt).endAngle() - ((OdDbArc)pEnt).startAngle();
-                double correctedAngleValue = angleValue > 0 ? angleValue : 2 * Math.PI + angleValue;
-                Rayon.Core.Types.RAngle sweepAngle = new Rayon.Core.Types.RAngle(correctedAngleValue);
-                newArcComp.SweepAngle = sweepAngle;
-                newArcComp.StartAngle = new Rayon.Core.Types.RAngle(((OdDbArc)pEnt).startAngle());
+
+                OdDbArc pArc = (OdDbArc)pEnt;
+
+                // sweepAngle
+                double sweepAngle = pArc.startAngle() < pArc.endAngle() ? pArc.endAngle() - pArc.startAngle() : 2*Math.PI - pArc.startAngle() + pArc.endAngle();
+                newArcComp.SweepAngle = new Rayon.Core.Types.RAngle(sweepAngle);
+
+                // startAngle
+                newArcComp.StartAngle = pArc.normal().z == -1 ? 
+                    new Rayon.Core.Types.RAngle(Math.PI - pArc.endAngle()) :
+                    new Rayon.Core.Types.RAngle(pArc.startAngle());
+
             }
 
             // to rayon
@@ -646,15 +657,39 @@ namespace OdReadExSwigMgd
         {
 
             OdDbSpline pSpline = OdDbSpline.cast(pEnt);
+            // return if cast failed
+            if (pSpline == null)
+            {
+                Console.WriteLine("cast OdDbEntity>OdDbSpline failed!");
+                return;
+            }
+
             OdDbCurve newCurve = OdDbPolyline.createObject();
-            // precsion value between 0 and 100%
-            int precision = 20;
+
+            // precision value between 0 and 100%
+            int precision = 1;
             OdResult conversionResult = pSpline.toPolyline(ref newCurve, true, true, precision);
+
+            //return if conversion failed
+            if (conversionResult.ToString() != "eOk") 
+            {
+                Console.WriteLine("toPolyline Conversion failed!");
+                return;
+            }
+
             OdDbPolyline pPoly = OdDbPolyline.cast(newCurve);
+            // return if cast failed
+            if (pPoly == null)
+            {
+                Console.WriteLine("cast OdDbCurve>OdDbPolyline failed!");
+                return;
+            }
 
             Rayon.Core.Components.PathComp newPathComp = new Rayon.Core.Components.PathComp();
             Rayon.Core.Types.RPoint2d closePoint = new Rayon.Core.Types.RPoint2d(0, 0);
+
             newPathComp.Closed = pPoly.isClosed();
+            
 
             // path layer
             Rayon.Core.Element thisElementLayer = Utils.getEntityLayer(pEnt, newModel);
@@ -663,10 +698,15 @@ namespace OdReadExSwigMgd
             // ID
             string pathId = pEnt.handle().ToString();
 
-            for (var i = 0; i < pPoly.numVerts() - 1; i++)
+            Console.WriteLine("***Test-{0}***", 4);
+
+            Console.WriteLine("*** {0} ***", pPoly.numVerts());
+
+            for (var i = 0; i < pPoly.numVerts()-1; i++)
             {
                 OdGePoint3d pt = new OdGePoint3d();
                 pPoly.getPointAt((uint)i, pt);
+
                 // Arc
                 if (i == 0)
                 {
@@ -694,6 +734,13 @@ namespace OdReadExSwigMgd
                             newPathComp.Verbs.Add(Rayon.Core.Components.PathComp.PathVerbEnum.CubicTo);
                         }
                     }
+                }
+
+                if (pPoly.vb_segType((uint)i).ToString() == "kLine") 
+                {
+                    Rayon.Core.Types.RPoint2d pointLine = Utils.OdGePoint3dToRPoint2d(pt);
+                    newPathComp.Verbs.Add(Rayon.Core.Components.PathComp.PathVerbEnum.LineTo);
+                    newPathComp.Points.Add(pointLine);
                 }
 
                 // End Point
@@ -919,18 +966,44 @@ namespace OdReadExSwigMgd
 
             // get transform matrix
             System.Drawing.Drawing2D.Matrix newMat = new System.Drawing.Drawing2D.Matrix();
+
+            Console.WriteLine("Rot: {0}", pBlkRef.rotation());
+            Console.WriteLine("Scale: {0} , {1}", pBlkRef.scaleFactors().sx, pBlkRef.scaleFactors().sy);
+            Console.WriteLine("Translate: {0} , {1}, {2}", pBlkRef.position().x, pBlkRef.position().y, pBlkRef.position().z);
+
             newMat.Rotate((float)(pBlkRef.rotation() * 180 / Math.PI));
             newMat.Scale((float)pBlkRef.scaleFactors().sx, (float)pBlkRef.scaleFactors().sy, System.Drawing.Drawing2D.MatrixOrder.Append);
             newMat.Translate((float)pBlkRef.position().x, (float)pBlkRef.position().y, System.Drawing.Drawing2D.MatrixOrder.Append);
 
+            Console.WriteLine(pBlkRef.blockTransform().getCsXAxis());
+            Console.WriteLine(pBlkRef.blockTransform().getCsYAxis());
+            Console.WriteLine(pBlkRef.blockTransform().getCsZAxis());
+
+            Console.WriteLine(pBlkRef.blockTransform());
+            OdGeMatrix3d matTransform = pBlkRef.blockTransform();
+
             List<double> transformValues = new List<double> {
-            newMat.Elements[0],
-            newMat.Elements[1],
-            newMat.Elements[2],
-            newMat.Elements[3],
-            newMat.Elements[4],
-            newMat.Elements[5]
+
+
+            matTransform[1,0],
+            matTransform[1,1],
+
+            matTransform[0,0],
+            matTransform[0,1],
+
+            //matTransform[3,1],
+            //matTransform[3,0]
+            0,0
             };
+
+            //List<double> transformValues = new List<double> {
+            //newMat.Elements[0],
+            //newMat.Elements[1],
+            //newMat.Elements[2],
+            //newMat.Elements[3],
+            //newMat.Elements[4],
+            //newMat.Elements[5]
+            //};
 
             // Instance 
             BlockInstanceComp newBlockInstanceComp = new BlockInstanceComp(pRecord.objectId().getHandle().ToString());
@@ -1181,6 +1254,7 @@ namespace OdReadExSwigMgd
             int zIndex = 1;
             double defaultLineWidth = 1;
 
+            // add layers and their styles to the model
             for (pIter.start(); !pIter.done(); pIter.step())
             {
 
@@ -1258,6 +1332,25 @@ namespace OdReadExSwigMgd
                 }
                 Console.WriteLine(" ");
             }
+
+            // add generic block style to the model
+            Rayon.Core.Element entStyle = Rayon.Core.Element.CreateStrokeStyle(
+                // model
+                newModel,
+                // styleName
+                "Default_Block_Style",
+                //color
+                new Rayon.Core.Types.RColor(0, 0, 0, 1),
+                //line width,
+                1,
+                //line style
+                StrokeStyleComp.StrokePatternEnum.Solid
+                );
+
+            Utils.blockStyleId = entStyle.Handle.ToString();
+
+
+            newModel.Elements.Add(entStyle);
         }
 
         // printing DWG elements and adding them to Rayon model
@@ -1299,10 +1392,23 @@ namespace OdReadExSwigMgd
                     Console.WriteLine("Model Space ID: {0}", pBlock.handle());
                     DbDumper.ModelId = pBlock.handle().ToString();
                     Console.WriteLine("  ");
-
                 }
                 // process Block (excluding Paper Space blocks)
-                else if (!pBlock.getName().ToString().Contains("*Paper_Space"))
+                //else if (!pBlock.getName().ToString().Contains("*Paper_Space"))
+                //{
+
+                //    Console.WriteLine(" ");
+                //    Console.WriteLine("### NEW NODE ###");
+                //    Console.WriteLine(" ");
+                //    Console.WriteLine(" ");
+                //    Console.WriteLine("Node ID = {0}", pBlock.handle());
+                //    Console.WriteLine("Node Name = {0}", pBlock.getName());
+                //    Console.WriteLine(" ");
+
+                //    dumpBlock(pBlock, newModel, parentId);
+
+                //}
+                else
                 {
 
                     Console.WriteLine(" ");
@@ -1316,6 +1422,7 @@ namespace OdReadExSwigMgd
                     dumpBlock(pBlock, newModel, parentId);
 
                 }
+
                 // iterate through all blocks in model, and print/add to Rayon model
                 // supported types:
                 //      1. Polyline
@@ -1326,12 +1433,19 @@ namespace OdReadExSwigMgd
                 //      6. Ellipse
                 //      7. Spline
                 //      8. Block
-                //      9. Hatch
+                //      9. Hatch // Work in Progress
                 // missing types: Dimension, Text, ...
                 for (pEntIter.start(); !pEntIter.done(); pEntIter.step())
                 {
 
                     OdDbEntity pEnt = OdDbEntity.cast(pEntIter.objectId().openObject());
+                    if (pEnt == null)
+                    {
+                        Console.WriteLine("cast OdDbObjectIterator>OdDbEntity failed!");
+                        return;
+                    }
+
+                    Console.WriteLine(pEnt.GetType().ToString());
 
                     //  1. Polyline
                     if (pEnt.GetType().ToString() is "Teigha.TD.OdDbPolyline")
@@ -1400,10 +1514,10 @@ namespace OdReadExSwigMgd
                     }
 
                     // 9. Hatch
-                    if (pEnt.GetType().ToString() is "Teigha.TD.OdDbHatch")
-                    {
-                        dumpHatch(pEnt, newModel, parentId);
-                    }
+                    //if (pEnt.GetType().ToString() is "Teigha.TD.OdDbHatch")
+                    //{
+                    //    dumpHatch(pEnt, newModel, parentId);
+                    //}
 
                     Console.WriteLine(" ");
 
@@ -1440,6 +1554,7 @@ namespace OdReadExSwigMgd
                 if (comp.LinkedElement != null)
                 {
                     linkedElements.Add(comp.LinkedElement);
+                    //comp.;
                 }
             }
 
@@ -1456,6 +1571,17 @@ namespace OdReadExSwigMgd
             else
             {
                 Console.WriteLine("  PASSED: No Missing Refs!");
+            }
+
+            //count styles
+            foreach (Rayon.Core.Element elem in Model.Elements)
+            {
+                foreach (Rayon.Core.Components.Component comp in elem.Components) 
+                {
+
+                    //Console.WriteLine(comp.ComponentType);
+
+                } ;
             }
         }
 
